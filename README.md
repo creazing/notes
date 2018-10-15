@@ -93,7 +93,7 @@
 
   线程使用方式、两种互斥同步方法、线程协作、JUC、线程安全、内存模型、锁优化。
 
-- [Java 虚拟机](https://github.com/CyC2018/InnterviewNotes/blob/master/notes/Java%20虚拟机.md)
+- [Java 虚拟机](https://github.com/creazing/notes/blob/master/notes/Java%20%E8%99%9A%E6%8B%9F%E6%9C%BA.md)
 
   运行时数据区域、垃圾收集、类加载。
 

@@ -81,7 +81,7 @@ for (String item : list) {
 }
 ```
 
-## 适配器模式
+## 适配器模式（数组转List)
 
 java.util.Arrays#asList() 可以把数组类型转换为 List 类型。
 
@@ -102,6 +102,10 @@ List list = Arrays.asList(arr);
 ```java
 List list = Arrays.asList(1,2,3);
 ```
+
+## 集合和数组的互转
+
+​	
 
 # 三、源码分析
 
@@ -637,6 +641,8 @@ static int indexFor(int h, int length) {
 
 ### 5. 扩容-基本原理
 
+容量都是2的整数次幂，之后计算索引的时候要和容量-1进行与运算，是的新老索引尽可能不变整体更分散
+
 设 HashMap 的 table 长度为 M，需要存储的键值对数量为 N，如果哈希函数满足均匀性的要求，那么每条链表的长度大约为 N/M，因此平均查找次数的复杂度为 O(N/M)。
 
 为了让查找的成本降低，应该尽可能使得 N/M 尽可能小，因此需要保证 M 尽可能大，也就是说 table 要尽可能大。HashMap 采用动态扩容来根据当前的 N 值来调整 M 值，使得空间效率和时间效率都能得到保证。
@@ -773,6 +779,14 @@ static final int tableSizeFor(int cap) {
 - HashMap 可以插入键为 null 的 Entry。
 - HashMap 的迭代器是 fail-fast 迭代器。
 - HashMap 不能保证随着时间的推移 Map 中的元素次序是不变的。
+
+### 10.线程不安全的表现
+
+1:put的时候当多个线程在同一个位置put的时候一个线程put后另一个线程又put了就会把之前的内容擦掉
+
+2：add的时候也是
+
+3：扩容的时候，扩容时元素之间可能回形成环，再次get的时候就会陷入死循环
 
 ## ConcurrentHashMap
 

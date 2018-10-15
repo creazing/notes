@@ -58,8 +58,9 @@
 * [参考资料](#参考资料)
 <!-- GFM-TOC -->
 
-
 # 一、线程状态转换
+
+新建——可运行——运行——阻塞——死亡
 
 <div align="center"> <img src="../pics//ace830df-9919-48ca-91b5-60b193f593d2.png" width=""/> </div><br>
 
@@ -72,6 +73,8 @@
 可能正在运行，也可能正在等待 CPU 时间片。
 
 包含了操作系统线程状态中的 Running 和 Ready。
+
+即使是在线程的执行逻辑中调用wait、sleep或其他block操作，也必须获得CPU的调度执行权才可以，严格来讲running的线程只能意外终止或者进入running
 
 ## 阻塞（Blocking）
 
@@ -260,7 +263,15 @@ public void run() {
 
 # 四、中断
 
+线程在阻塞状态下被打断的话回抛出InterruptedException异常，调用interrupt可以中断这种阻塞，如果一个线程被interrupt那么该线程的interrupt标志会被设置
+
+isinterrupted仅仅是对interrupt标识的一个判断，并不会影响标志；但是捕获异常后会重置interrupt标志
+
+interrupted，如果当前线程被打断则会返回true并且立即擦除interrupt标识，如果未被中断则会返回false
+
 一个线程执行完毕之后会自动结束，如果在运行过程中发生异常也会提前结束。
+
+利用：1、终止阻塞状态的线程，通过捕获异常来中断线程 1、终止运行状态的线程，将中断标记作为判断条件
 
 ## InterruptedException
 
@@ -566,6 +577,28 @@ synchronized 中的锁是非公平的，ReentrantLock 默认情况下也是非�
 
 除非需要使用 ReentrantLock 的高级功能，否则优先使用 synchronized。这是因为 synchronized 是 JVM 实现的一种锁机制，JVM 原生地支持它，而 ReentrantLock 不是所有的 JDK 版本都支持。并且使用 synchronized 不用担心没有释放锁而导致死锁问题，因为 JVM 会确保锁的释放。
 
+## synchronized原理
+
+对象的Mark Word 中有指向的是monitor对象（也称为管程或监视器锁）的起始地址的指针。每个对象都存在着一个 monitor 与之关联，monitor可以与对象一起创建销毁或当线程试图获取对象锁时自动生成，但当一个 monitor 被某个线程持有后，它便处于锁定状态。在Java虚拟机(HotSpot)中，monitor是由ObjectMonitor实现的。
+
+ObjectMonitor中有两个队列，WaitSet 和 _EntryList，用来保存ObjectWaiter对象列表( 每个等待锁的线程都会被封装成ObjectWaiter对象)，owner指向持有ObjectMonitor对象的线程，当多个线程同时访问一段同步代码时，首先会进入 _EntryList 集合，当线程获取到对象的monitor 后进入 _Owner 区域并把monitor中的owner变量设置为当前线程同时monitor中的计数器count加1，若线程调用 wait() 方法，将释放当前持有的monitor，owner变量恢复为null，count自减1，同时该线程进入 WaitSet集合中等待被唤醒。若当前线程执行完毕也将释放monitor(锁)并复位变量的值，以便其他线程进入获取monitor(锁)。
+
+**同步代码块原理**
+
+同步语句块的实现使用的是monitorenter 和 monitorexit 指令，其中monitorenter指令指向同步代码块的开始位置，monitorexit指令则指明同步代码块的结束位置
+
+当执行enter指令时，当前线程试图获取monitor，如果monitor的计数器为 0则本线程可获取，如果不为0则等持有monitor的线程执行完毕将计数器设置为0后本线程获取monitor并将计数器加1，执行eixt也就是线程执行完毕是将计数器设置为0.
+
+注：当本线程现在已经获取monitor时可以重获取
+
+**同步函数**
+
+synchronized修饰的方法并没有monitorenter指令和monitorexit指令，取得代之的确实是ACC_SYNCHRONIZED标识，该标识指明了该方法是一个同步方法，JVM通过该ACC_SYNCHRONIZED访问标志来辨别一个方法是否声明为同步方法，从而执行相应的同步调用。
+
+同时我们还必须注意到的是在Java早期版本中，synchronized属于重量级锁，效率低下，因为监视器锁（monitor）是依赖于底层的操作系统的Mutex Lock来实现的，而操作系统实现线程之间的切换时需要从用户态转换到核心态，这个状态之间的转换需要相对比较长的时间，时间成本相对较高，这也是为什么早期的synchronized效率低的原因。
+
+
+
 # 六、线程之间的协作
 
 当多个线程可以一起工作去解决某个问题时，如果某些部分必须在其它部分之前完成，那么就需要对线程进行协调。
@@ -726,7 +759,21 @@ before
 after
 ```
 
-# 七、J.U.C - AQS
+# 七、J.U.C - AQS(AQS)
+
+## AQS
+
+它维护了一个volatile int state（代表共享资源）和一个FIFO线程等待队列（多线程争用资源被阻塞时会进入此队列）。这里volatile是核心关键词，具体volatile的语义，在此不述。
+
+以ReentrantLock为例，state初始化为0，表示未锁定状态。A线程lock()时，会调用tryAcquire()独占该锁并将state+1。此后，其他线程再tryAcquire()时就会失败，直到A线程unlock()到state=0（即释放锁）为止，其它线程才有机会获取该锁。当然，释放锁之前，A线程自己是可以重复获取此锁的（state会累加），这就是可重入的概念。但要注意，获取多少次就要释放多么次，这样才能保证state是能回到零态的。
+
+再以CountDownLatch以例，任务分为N个子线程去执行，state也初始化为N（注意N要与线程个数一致）。这N个子线程是并行执行的，每个子线程执行完后countDown()一次，state会CAS减1。等到所有子线程都执行完后(即state=0)，会unpark()主调用线程，然后主调用线程就会从await()函数返回，继续后余动作。
+
+ CHL队列是一个非阻塞的 FIFO 队列，也就是说往里面插入或移除一个节点的时候，在并发条件下不会阻塞，而是通过自旋锁和 CAS 保证节点插入和移除的原子性。实现无锁且快速的插入。
+
+**state机制**
+
+提供 volatile 变量 state;  用于同步线程之间的共享状态。通过 CAS 和 volatile 保证其原子性和可见性。
 
 java.util.concurrent（J.U.C）大大提高了并发性能，AQS 被认为是 J.U.C 的核心。
 
@@ -815,6 +862,8 @@ before..before..before..before..before..before..before..before..before..before..
 ```
 
 ## Semaphore
+
+记录当前还有多少次许可可以使用，到0，就需要等待，也就实现并发量的控制，Semaphore一开始设置许可数为1，实际上就是一把互斥锁。 
 
 Semaphore 类似于操作系统中的信号量，可以控制对互斥资源的访问线程数。
 
@@ -1216,7 +1265,7 @@ volatile 关键字通过添加内存屏障的方式来禁止指令重排，即�
 
 也可以通过 synchronized 来保证有序性，它保证每个时刻只有一个线程执行同步代码，相当于是让线程顺序执行同步代码。
 
-## 先行发生原则
+## 先行发生原则(可以不看)
 
 上面提到了可以用 volatile 和 synchronized 来保证有序性。除此之外，JVM 还规定了先行发生原则，让一个操作无需控制就能先于另一个操作完成。
 
@@ -1331,7 +1380,7 @@ synchronized 和 ReentrantLock。
 
 互斥同步属于一种悲观的并发策略，总是认为只要不去做正确的同步措施，那就肯定会出现问题。无论共享数据是否真的会出现竞争，它都要进行加锁（这里讨论的是概念模型，实际上虚拟机会优化掉很大一部分不必要的加锁）、用户态核心态转换、维护锁计数器和检查是否有被阻塞的线程需要唤醒等操作。
 
-### 1. CAS
+### 1. CAS（乐观锁利用的机制就是CSA）
 
 随着硬件指令集的发展，我们可以使用基于冲突检测的乐观并发策略：先进行操作，如果没有其它线程争用共享数据，那操作就成功了，否则采取补偿措施（不断地重试，直到成功为止）。这种乐观的并发策略的许多实现都不需要将线程阻塞，因此这种同步操作称为非阻塞同步。
 
@@ -1618,6 +1667,85 @@ JDK 1.6 引入了偏向锁和轻量级锁，从而让锁拥有了四个状态：
 - 使用本地变量和不可变类来保证线程安全。
 
 - 使用线程池而不是直接创建线程，这是因为创建线程代价很高，线程池可以有效地利用有限的线程来启动任务。
+
+# 十四、线程池
+
+## 原理
+
+线程可以复用，就是执行完一个任务，并不被销毁，而是可以继续执行其他的任务 
+
+## 参数
+
+- corePoolSize：核心池的大小，这个参数跟后面讲述的线程池的实现原理有非常大的关系。在创建了线程池后，默认情况下，线程池中并没有任何线程，而是等待有任务到来才创建线程去执行任务，除非调用了prestartAllCoreThreads()或者prestartCoreThread()方法，从这2个方法的名字就可以看出，是预创建线程的意思，即在没有任务到来之前就创建corePoolSize个线程或者一个线程。默认情况下，在创建了线程池后，线程池中的线程数为0，当有任务来之后，就会创建一个线程去执行任务，当线程池中的线程数目达到corePoolSize后，就会把到达的任务放到缓存队列当中；
+- maximumPoolSize：线程池最大线程数，这个参数也是一个非常重要的参数，它表示在线程池中最多能创建多少个线程；
+- keepAliveTime：表示线程没有任务执行时最多保持多久时间会终止。默认情况下，只有当线程池中的线程数大于corePoolSize时，keepAliveTime才会起作用，直到线程池中的线程数不大于corePoolSize，即当线程池中的线程数大于corePoolSize时，如果一个线程空闲的时间达到keepAliveTime，则会终止，直到线程池中的线程数不超过corePoolSize。但是如果调用了allowCoreThreadTimeOut(boolean)方法，在线程池中的线程数不大于corePoolSize时，keepAliveTime参数也会起作用，直到线程池中的线程数为0；
+- unit：参数keepAliveTime的时间单位，有7种取值，在TimeUnit类中有7种静态属性：
+
+```java
+TimeUnit.DAYS;               //天
+TimeUnit.HOURS;             //小时
+TimeUnit.MINUTES;           //分钟
+TimeUnit.SECONDS;           //秒
+TimeUnit.MILLISECONDS;      //毫秒
+TimeUnit.MICROSECONDS;      //微妙
+TimeUnit.NANOSECONDS;       //纳秒
+```
+
+- workQueue：一个阻塞队列，用来存储等待执行的任务，这个参数的选择也很重要，会对线程池的运行过程产生重大影响，一般来说，这里的阻塞队列有以下几种选择：
+
+```Java
+ArrayBlockingQueue;
+LinkedBlockingQueue;
+SynchronousQueue;
+```
+
+　　ArrayBlockingQueue和PriorityBlockingQueue使用较少，一般使用LinkedBlockingQueue和Synchronous。线程池的排队策略与BlockingQueue有关。
+
+- threadFactory：线程工厂，主要用来创建线程；
+- handler：表示当拒绝处理任务时的策略，有以下四种取值：
+
+```Java
+ThreadPoolExecutor.AbortPolicy:丢弃任务并抛出RejectedExecutionException异常。 
+ThreadPoolExecutor.DiscardPolicy：也是丢弃任务，但是不抛出异常。 
+ThreadPoolExecutor.DiscardOldestPolicy：丢弃队列最前面的任务，然后重新尝试执行任务（重复此过程）
+ThreadPoolExecutor.CallerRunsPolicy：由调用线程处理该任务 
+```
+
+## **线程池状态**
+
+　　在ThreadPoolExecutor中定义了一个volatile变量，另外定义了几个static final变量表示线程池的各个状态：
+
+```Java
+volatile int runState;
+static final int RUNNING    = 0;
+static final int SHUTDOWN   = 1;
+static final int STOP       = 2;
+static final int TERMINATED = 3;
+```
+
+ 　　runState表示当前线程池的状态，它是一个volatile变量用来保证线程之间的可见性；
+
+　　下面的几个static final变量表示runState可能的几个取值。
+
+　　当创建线程池后，初始时，线程池处于RUNNING状态；
+
+　　如果调用了shutdown()方法，则线程池处于SHUTDOWN状态，此时线程池不能够接受新的任务，它会等待所有任务执行完毕；
+
+　　如果调用了shutdownNow()方法，则线程池处于STOP状态，此时线程池不能接受新的任务，并且会去尝试终止正在执行的任务；
+
+　　当线程池处于SHUTDOWN或STOP状态，并且所有工作线程已经销毁，任务缓存队列已经清空或执行结束后，线程池被设置为TERMINATED状态。
+
+## **任务缓存队列及排队策略**
+
+　　在前面我们多次提到了任务缓存队列，即workQueue，它用来存放等待执行的任务。
+
+　　workQueue的类型为BlockingQueue<Runnable>，通常可以取下面三种类型：
+
+　　1）ArrayBlockingQueue：基于数组的先进先出队列，此队列创建时必须指定大小；
+
+　　2）LinkedBlockingQueue：基于链表的先进先出队列，如果创建时没有指定此队列大小，则默认为Integer.MAX_VALUE；
+
+　　3）synchronousQueue：这个队列比较特殊，它不会保存提交的任务，而是将直接新建一个线程来执行新来的任务。
 
 # 参考资料
 
